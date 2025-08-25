@@ -171,4 +171,4 @@ pep2bmp: pepr $(PEP_OUT)
 
 .PHONY: clean
 clean:
-	rm -f pepr $(DEMO_OUT) $(PEP_OUT) $(BMP_OUT) "$(CSV)" "$(TMP_OPT)" "$(TMP_NOOPT)" .opt.sorted .noopt.sorted
+	rm -f pepr $(DEMO_OUT) $(PEP_OUT) $(BMP_OUT) "$(CSV)" "$(TMP_OPT)" "$(TMP_NOOPT)" .opt.sorted .noopt.sorted .joined
