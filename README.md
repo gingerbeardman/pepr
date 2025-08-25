@@ -1,2 +1,3 @@
 # pepr
-Simple CLI wrapper for pep.h image format
+
+Simple CLI wrapper for [PEP](url) image format
