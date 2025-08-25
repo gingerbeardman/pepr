@@ -2,7 +2,7 @@
 
 Simple CLI wrapper for [PEP](https://github.com/ENDESGA/PEP) image format.
 
-Makefile only tested on macOS.
+macOS only due to its reliance on various Apple technologies.
 
 > Mushroom pixel art by Maya Sephton
 
