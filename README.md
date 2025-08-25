@@ -2,10 +2,6 @@
 
 Simple CLI wrapper for [PEP](url) image format
 
-----
+> Mushroom pixel art by Maya Sephton
 
-Mushroom pixel art by Maya Sephton
-
-----
-
-MIT licence
+[MIT licence](LICENSE)
