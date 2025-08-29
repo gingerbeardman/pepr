@@ -5,7 +5,14 @@
 #include <ImageIO/ImageIO.h>
 #include <CoreGraphics/CoreGraphics.h>
 #define PEP_IMPLEMENTATION
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunsequenced"
+#endif
 #include "PEP.h"
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 static void print_usage(const char* prog){
 	fprintf(stderr,
@@ -13,11 +20,12 @@ static void print_usage(const char* prog){
 		"  %s --demo <out.pep>                Generate a 32x32 demo image.\n"
 		"  %s --rgba <w> <h> <in.rgba> <out.pep>  Convert raw RGBA32 to .pep\n"
 		"  %s --image <in.img> <out.pep>       Convert image (PNG/TIFF/etc) to .pep\n"
+		"  %s --dry-run <in.img>               Encode image to memory only (benchmark)\n"
 		"  %s --to-bmp <in.pep> <out.bmp>      Convert .pep to 32-bit BMP\n"
 		"  %s --to-rle-bmp <in.pep> <out.rle>  Convert .pep to 8-bit RLE BMP (.rle)\n"
 		"  %s <in> [out]                        Auto: .pep→.bmp, else img→.pep\n"
 		"\nNotes:\n  - <in.rgba> must be width*height*4 bytes (RGBA8).\n",
-		prog, prog, prog, prog, prog, prog);
+		prog, prog, prog, prog, prog, prog, prog);
 }
 
 static int has_ext_ci( const char* const path, const char* const ext )
@@ -113,7 +121,6 @@ int main(int argc, char** argv){
 		}
 
 		pep p = pep_compress(pixels, w, h, pep_rgba, pep_rgba);
-		p.is_4bit = 0;
 		free(pixels);
 
 		if(p.bytes == NULL || p.bytes_size == 0){
@@ -165,7 +172,6 @@ int main(int argc, char** argv){
 		free(raw);
 
 		pep p = pep_compress(pixels, w, h, pep_rgba, pep_rgba);
-		p.is_4bit = 0;
 		free(pixels);
 		if(p.bytes == NULL || p.bytes_size == 0){ fprintf(stderr, ".pep compression failed\n"); return 2; }
 		if(!pep_save(&p, out_path)){ fprintf(stderr, "failed to save %s\n", out_path); pep_free(&p); return 3; }
@@ -225,12 +231,76 @@ int main(int argc, char** argv){
 		free(raw);
 
 		pep p = pep_compress(pixels, (uint16_t)w, (uint16_t)h, pep_rgba, pep_rgba);
-		p.is_4bit = 0;
 		free(pixels);
 		if(p.bytes == NULL || p.bytes_size == 0){ fprintf(stderr, ".pep compression failed\n"); return 2; }
 		if(!pep_save(&p, out_path)){ fprintf(stderr, "failed to save %s\n", out_path); pep_free(&p); return 3; }
 		pep_free(&p);
 		printf("Wrote %s (%zux%zu)\n", out_path, w, h);
+		return 0;
+	}
+
+	if(strcmp(argv[1], "--dry-run") == 0){
+		if(argc != 3){ print_usage(argv[0]); return 1; }
+		const char* in_png = argv[2];
+
+		CFStringRef pathStr = CFStringCreateWithCString(kCFAllocatorDefault, in_png, kCFStringEncodingUTF8);
+		if(!pathStr){ fprintf(stderr, "CFStringCreateWithCString failed\n"); return 1; }
+		CFURLRef url = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, pathStr, kCFURLPOSIXPathStyle, false);
+		CFRelease(pathStr);
+		if(!url){ fprintf(stderr, "CFURLCreateWithFileSystemPath failed\n"); return 1; }
+
+		CGImageSourceRef src = CGImageSourceCreateWithURL(url, NULL);
+		CFRelease(url);
+		if(!src){ fprintf(stderr, "CGImageSourceCreateWithURL failed\n"); return 1; }
+		CGImageRef img = CGImageSourceCreateImageAtIndex(src, 0, NULL);
+		CFRelease(src);
+		if(!img){ fprintf(stderr, "CGImageSourceCreateImageAtIndex failed\n"); return 1; }
+
+		size_t w = CGImageGetWidth(img);
+		size_t h = CGImageGetHeight(img);
+		if(w == 0 || h == 0){ CFRelease(img); fprintf(stderr, "invalid image size\n"); return 1; }
+
+		const size_t bytesPerPixel = 4;
+		const size_t bytesPerRow = w * bytesPerPixel;
+		uint8_t* raw = (uint8_t*)malloc(h * bytesPerRow);
+		if(!raw){ CFRelease(img); fprintf(stderr, "alloc failed\n"); return 1; }
+
+		CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+		CGBitmapInfo info = kCGImageAlphaPremultipliedLast | kCGBitmapByteOrderDefault; // RGBA8
+		CGContextRef ctx = CGBitmapContextCreate(raw, w, h, 8, bytesPerRow, cs, info);
+		CGColorSpaceRelease(cs);
+		if(!ctx){ free(raw); CFRelease(img); fprintf(stderr, "CGBitmapContextCreate failed\n"); return 1; }
+
+		CGRect rect = CGRectMake(0, 0, (CGFloat)w, (CGFloat)h);
+		CGContextDrawImage(ctx, rect, img);
+		CGContextRelease(ctx);
+		CFRelease(img);
+
+		// Compress to memory only (no file I/O)
+		uint32_t* pixels = (uint32_t*)malloc(w * h * sizeof(uint32_t));
+		if(!pixels){ free(raw); fprintf(stderr, "alloc failed\n"); return 1; }
+		for(size_t i=0;i<w*h;i++){
+			uint8_t r = raw[i*4+0];
+			uint8_t g = raw[i*4+1];
+			uint8_t b = raw[i*4+2];
+			uint8_t a = raw[i*4+3];
+			pixels[i] = make_color_rgba(r,g,b,a);
+		}
+		free(raw);
+
+		pep p = pep_compress(pixels, (uint16_t)w, (uint16_t)h, pep_rgba, pep_rgba);
+		free(pixels);
+		if(p.bytes == NULL || p.bytes_size == 0){ fprintf(stderr, ".pep compression failed\n"); return 2; }
+		
+		// Optionally serialize to get final byte size (still in memory)
+		uint32_t serialized_size = 0;
+		uint8_t* serialized = pep_serialize(&p, &serialized_size);
+		if(serialized){
+			free(serialized); // We don't need the actual bytes, just wanted the size
+		}
+		
+		pep_free(&p);
+		// Silent success - benchmarking tools don't want output
 		return 0;
 	}
 

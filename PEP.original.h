@@ -16,11 +16,12 @@
 #ifndef _PEP_H_
 #define _PEP_H_
 
-// Optimized version with minimal dependencies:
+// Might find a way to eliminate the use of memset to eliminate string.h,
+// but for now these are required:
 #include <stdint.h> // uint*_t
 #include <stdlib.h> // mem-alloc
 #include <stdio.h> // FILE
-// Removed string.h dependency - using {0} initialization instead
+#include <string.h> // memset
 
 // Copy and add this define ONCE before an `#include "PEP.h"`.
 // This makes the compiler actually define the functions, allowing you to
@@ -84,9 +85,7 @@ pep;
 // contexts you have the smaller the image is...
 #define PEP_FREQ_N 257
 #define PEP_FREQ_END ( PEP_FREQ_N - 1 )
-// Optimization: Use power-of-2 contexts for fast modulo via masking
-#define PEP_CONTEXTS_MAX 256
-#define PEP_CONTEXTS_MASK (PEP_CONTEXTS_MAX - 1)
+#define PEP_CONTEXTS_MAX PEP_FREQ_END
 
 // These contants are for the 63bit arithmetic-coding, specifically not 64bit
 // because of overflow.
@@ -207,75 +206,25 @@ _pep_sym_decode;
 // How many bits do we need to fit N values?
 #define PEP_BITS_TO_FIT( N )( ( ( N ) <= 1 ) ? 1 : ( 32 - PEP_COUNT_LEADING_ZEROS( ( N ) - 1 ) ) )
 
-// Branch prediction hints for performance-critical paths
-#ifndef PEP_LIKELY
-	#if defined(__GNUC__) || defined(__clang__)
-		#define PEP_LIKELY(x)   __builtin_expect(!!(x), 1)
-		#define PEP_UNLIKELY(x) __builtin_expect(!!(x), 0)
-	#else
-		#define PEP_LIKELY(x)   (x)
-		#define PEP_UNLIKELY(x) (x)
-	#endif
-#endif
-
-// Force inline for critical hot paths
-#ifndef PEP_FORCE_INLINE
-	#if defined(__GNUC__) || defined(__clang__)
-		#define PEP_FORCE_INLINE __attribute__((always_inline)) inline
-	#elif defined(_MSC_VER)
-		#define PEP_FORCE_INLINE __forceinline
-	#else
-		#define PEP_FORCE_INLINE inline
-	#endif
-#endif
-
-// Hot path optimization hints
-#ifndef PEP_HOT
-	#if defined(__GNUC__) || defined(__clang__)
-		#define PEP_HOT __attribute__((hot))
-	#else
-		#define PEP_HOT
-	#endif
-#endif
-
-// Prefetch hints for memory access patterns
-#ifndef PEP_PREFETCH
-	#if defined(__GNUC__) || defined(__clang__)
-		#define PEP_PREFETCH(addr, rw, locality) __builtin_prefetch(addr, rw, locality)
-	#else
-		#define PEP_PREFETCH(addr, rw, locality) ((void)0)
-	#endif
-#endif
-
-// SIMD alignment hints
-#ifndef PEP_ASSUME_ALIGNED
-	#if defined(__GNUC__) || defined(__clang__)
-		#define PEP_ASSUME_ALIGNED(ptr, align) __builtin_assume_aligned(ptr, align)
-	#else
-		#define PEP_ASSUME_ALIGNED(ptr, align) (ptr)
-	#endif
-#endif
-
 /////// /////// /////// /////// /////// /////// ///////
 
-// Performance hints for critical functions - hot path optimized
-static PEP_FORCE_INLINE PEP_HOT _pep_prob _pep_get_prob_from_ctx( const _pep_context* const restrict ctx, const uint32_t symbol );
-static PEP_FORCE_INLINE PEP_HOT void _pep_arith_encode( _pep_ac_encode* const restrict ac, const _pep_prob prob );
-static PEP_FORCE_INLINE PEP_HOT void _pep_arith_encode_normalize( _pep_ac_encode* const restrict ac );
-static PEP_FORCE_INLINE PEP_HOT uint32_t _pep_arith_decode_curr_freq( _pep_ac_decode* const restrict ac, const uint32_t scale );
-static PEP_FORCE_INLINE PEP_HOT void _pep_arith_decode_update( _pep_ac_decode* const restrict ac, const _pep_prob prob );
-static PEP_FORCE_INLINE PEP_HOT _pep_sym_decode _pep_get_sym_from_freq( const _pep_context* const restrict ctx, const uint32_t target_freq, const uint32_t max_symbol );
+static inline _pep_prob _pep_get_prob_from_ctx( const _pep_context* const ctx, const uint32_t symbol );
+static inline void _pep_arith_encode( _pep_ac_encode* const ac, const _pep_prob prob );
+static inline void _pep_arith_encode_normalize( _pep_ac_encode* const ac );
+static inline uint32_t _pep_arith_decode_curr_freq( _pep_ac_decode* const ac, const uint32_t scale );
+static inline void _pep_arith_decode_update( _pep_ac_decode* const ac, const _pep_prob prob );
+static inline _pep_sym_decode _pep_get_sym_from_freq( const _pep_context* const ctx, const uint32_t target_freq, const uint32_t max_symbol );
 
 static inline uint32_t _pep_reformat( const uint32_t in_color, const pep_format in_format, const pep_format out_format );
-static inline pep pep_compress( const uint32_t* restrict in_pixels, const uint16_t width, const uint16_t height, const pep_format in_format, const pep_format out_format );
-static inline uint32_t* pep_decompress( const pep* const restrict in_pep, const pep_format out_format, const uint8_t first_color_transparent );
+static inline pep pep_compress( const uint32_t* in_pixels, const uint16_t width, const uint16_t height, const pep_format in_format, const pep_format out_format );
+static inline uint32_t* pep_decompress( const pep* const in_pep, const pep_format out_format, const uint8_t first_color_transparent );
 static inline void pep_free( pep* in_pep );
 
-static inline uint8_t* pep_serialize( const pep* restrict in_pep, uint32_t* const restrict out_size );
-static inline pep pep_deserialize( const uint8_t* const restrict in_bytes );
+static inline uint8_t* pep_serialize( const pep* in_pep, uint32_t* const out_size );
+static inline pep pep_deserialize( const uint8_t* const in_bytes );
 
-static inline uint8_t pep_save( const pep* const restrict in_pep, const char* const restrict file_path );
-static inline pep pep_load( const char* const restrict file_path );
+static inline uint8_t pep_save( const pep* const in_pep, const char* const file_path );
+static inline pep pep_load( const char* const file_path );
 
 #endif // _PEP_H_
 
@@ -292,33 +241,24 @@ static inline pep pep_load( const char* const restrict file_path );
 	#pragma warning( disable : 4996 )
 #endif
 
-// Getting cumulative frequency of symbol - optimized hot path
-static PEP_FORCE_INLINE PEP_HOT _pep_prob _pep_get_prob_from_ctx( const _pep_context* const restrict ctx, const uint32_t symbol )
+// Getting cumulative frequnce of symbol
+static inline _pep_prob _pep_get_prob_from_ctx( const _pep_context* const ctx, const uint32_t symbol )
 {
 	_pep_prob prob = { 0 };
 	prob.scale = ctx->sum;
 
-	// Optimized loop with prefetch and SIMD hints
-	const uint16_t* restrict freq = PEP_ASSUME_ALIGNED(ctx->freq, 16);
-	
-	// Prefetch next cache line if symbol is large enough
-	if( PEP_LIKELY( symbol > 8 ) )
-	{
-		PEP_PREFETCH( &freq[ symbol ], 0, 3 );
-	}
-	
 	for( uint32_t i = 0; i < symbol; ++i )
 	{
-		prob.low += freq[ i ];
+		prob.low += ctx->freq[ i ];
 	}
 
-	prob.high = prob.low + freq[ symbol ];
+	prob.high = prob.low + ctx->freq[ symbol ];
 	return prob;
 }
 
 // This encodes a symbol into the arithmetic-coding range. It scales the
 // current range based on the symbol's frequency and total frequency count.
-static PEP_FORCE_INLINE PEP_HOT void _pep_arith_encode( _pep_ac_encode* const restrict ac, const _pep_prob prob )
+static inline void _pep_arith_encode( _pep_ac_encode* const ac, const _pep_prob prob )
 {
 	ac->range /= prob.scale;
 	ac->low += prob.low * ac->range;
@@ -328,13 +268,13 @@ static PEP_FORCE_INLINE PEP_HOT void _pep_arith_encode( _pep_ac_encode* const re
 // Adjusts the arithmetic-coding range by removing a boundary value
 // Main goal of this process is to keep our range from getting
 // too small.
-static PEP_FORCE_INLINE PEP_HOT void _pep_arith_encode_normalize( _pep_ac_encode* const restrict ac )
+static inline void _pep_arith_encode_normalize( _pep_ac_encode* const ac )
 {
 	while( 1 )
 	{
-		if( PEP_UNLIKELY( ( ac->low ^ ( ac->low + ac->range ) ) >= PEP_CODE_MAX_VALUE ) )
+		if( ( ac->low ^ ( ac->low + ac->range ) ) >= PEP_CODE_MAX_VALUE )
 		{
-			if( PEP_UNLIKELY( ac->range < PEP_PROB_MAX_VALUE ) )
+			if( ac->range < PEP_PROB_MAX_VALUE )
 			{
 				ac->range = PEP_PROB_MAX_VALUE - (ac->low & (PEP_PROB_MAX_VALUE - 1));
 			}
@@ -349,7 +289,7 @@ static PEP_FORCE_INLINE PEP_HOT void _pep_arith_encode_normalize( _pep_ac_encode
 }
 
 // Getting current frequency by doing reverse trasformation
-static PEP_FORCE_INLINE PEP_HOT uint32_t _pep_arith_decode_curr_freq( _pep_ac_decode* const restrict ac, const uint32_t scale )
+static inline uint32_t _pep_arith_decode_curr_freq( _pep_ac_decode* const ac, const uint32_t scale )
 {
 	ac->range /= scale;
 	uint32_t result = ( ac->code - ac->low ) / ( ac->range );
@@ -357,16 +297,16 @@ static PEP_FORCE_INLINE PEP_HOT uint32_t _pep_arith_decode_curr_freq( _pep_ac_de
 }
 
 // Same as with the encode_normalize, only on decode we reading in value
-static PEP_FORCE_INLINE PEP_HOT void _pep_arith_decode_update( _pep_ac_decode* const restrict ac, const _pep_prob prob )
+static inline void _pep_arith_decode_update( _pep_ac_decode* const ac, const _pep_prob prob )
 {
 	ac->low += ac->range * prob.low;
 	ac->range *= prob.high - prob.low;
 
 	while( 1 )
 	{
-		if( PEP_UNLIKELY( ( ac->low ^ ( ac->low + ac->range ) ) >= PEP_CODE_MAX_VALUE ) )
+		if( ( ac->low ^ ( ac->low + ac->range ) ) >= PEP_CODE_MAX_VALUE )
 		{
-			if( PEP_UNLIKELY( ac->range < PEP_PROB_MAX_VALUE ) )
+			if( ac->range < PEP_PROB_MAX_VALUE )
 			{
 				ac->range = PEP_PROB_MAX_VALUE - (ac->low & (PEP_PROB_MAX_VALUE - 1));
 			}
@@ -374,7 +314,7 @@ static PEP_FORCE_INLINE PEP_HOT void _pep_arith_decode_update( _pep_ac_decode* c
 		}
 
 		uint8_t in_byte = 0;
-		if( PEP_LIKELY( ac->data_ref != ac->end_of_data ) )
+		if( ac->data_ref != ac->end_of_data )
 		{
 			in_byte = *ac->data_ref++;
 		}
@@ -385,24 +325,22 @@ static PEP_FORCE_INLINE PEP_HOT void _pep_arith_decode_update( _pep_ac_decode* c
 	}
 }
 
-static PEP_FORCE_INLINE PEP_HOT _pep_sym_decode _pep_get_sym_from_freq( const _pep_context* const restrict ctx, const uint32_t target_freq, const uint32_t max_symbol )
+static inline _pep_sym_decode _pep_get_sym_from_freq( const _pep_context* const ctx, const uint32_t target_freq, const uint32_t max_symbol )
 {
 	_pep_sym_decode result = { };
 
 	uint32_t s = 0;
 	uint32_t freq = 0;
-	const uint16_t* restrict freq_table = PEP_ASSUME_ALIGNED(ctx->freq, 16);
-	
 	for( ; s < max_symbol; ++s )
 	{
-		freq += freq_table[ s ];
-		if( PEP_LIKELY( freq > target_freq ) ) break;
+		freq += ctx->freq[ s ];
+		if( freq > target_freq ) break;
 	}
 
-	if( PEP_UNLIKELY( s >= max_symbol ) )
+	if( s >= max_symbol )
 	{
 		s = PEP_FREQ_END;
-		freq += freq_table[ PEP_FREQ_END ];
+		freq += ctx->freq[ PEP_FREQ_END ];
 	}
 
 	result.prob.high = freq;
@@ -506,9 +444,10 @@ static inline pep pep_compress( const uint32_t* in_pixels, const uint16_t width,
 	const uint8_t indices_per_byte = 8 / bits_per_index;
 	const uint8_t index_mask = ( 1 << bits_per_index ) - 1;
 
-	static _pep_context contexts[ PEP_CONTEXTS_MAX + 1 ] = { 0 };
+	static _pep_context contexts[ PEP_CONTEXTS_MAX + 1 ];
+	memset( contexts, 0, sizeof( _pep_context ) * ( PEP_CONTEXTS_MAX + 1 ) );
 
-	_pep_context* restrict order0 = &contexts[ PEP_CONTEXTS_MAX ];
+	_pep_context* order0 = &contexts[ PEP_CONTEXTS_MAX ];
 	for( uint64_t i = 0; i < PEP_FREQ_N; i++ ) order0->freq[ i ] = 1;
 	order0->sum = PEP_FREQ_N;
 
@@ -523,20 +462,13 @@ static inline pep pep_compress( const uint32_t* in_pixels, const uint16_t width,
 
 	while( p < p_end || indices_in_byte > 0 )
 	{
-		if( PEP_LIKELY( p < p_end ) )
+		if( p < p_end )
 		{
-			// Prefetch next pixels for better cache performance
-			if( PEP_LIKELY( p + 4 < p_end ) )
-			{
-				PEP_PREFETCH( p + 4, 0, 3 );
-			}
-			
 			this_p = _pep_reformat( *p, in_format, out_format );
 			uint16_t index = 0;
-			const uint32_t* restrict palette = PEP_ASSUME_ALIGNED(out_pep.palette, 16);
-			while( index < out_pep.palette_size && this_p != palette[ index ] )
+			while( index < out_pep.palette_size && this_p != out_pep.palette[ index ] )
 			{
-				if( PEP_UNLIKELY( ++index >= 256 ) )
+				if( ++index >= 256 )
 				{
 					index = 0;
 					break;
@@ -547,14 +479,14 @@ static inline pep pep_compress( const uint32_t* in_pixels, const uint16_t width,
 			++indices_in_byte;
 		}
 
-		if( PEP_LIKELY( indices_in_byte >= indices_per_byte ) || PEP_UNLIKELY( p >= p_end && indices_in_byte > 0 ) )
+		if( indices_in_byte >= indices_per_byte || ( p >= p_end && indices_in_byte > 0 ) )
 		{
 			uint64_t accum = 0;
-			if( PEP_UNLIKELY( symbol > out_pep.max_symbols ) ) out_pep.max_symbols = symbol;
-			_pep_context* const restrict context_ref = &contexts[ context_id & PEP_CONTEXTS_MASK ];
+			if( symbol > out_pep.max_symbols ) out_pep.max_symbols = symbol;
+			_pep_context* const context_ref = &contexts[ context_id % PEP_CONTEXTS_MAX ];
 			const uint32_t context_sum = context_ref->sum;
 
-			if( PEP_LIKELY( context_sum != 0 && context_ref->freq[ symbol ] != 0 ) )
+			if( context_sum != 0 && context_ref->freq[ symbol ] != 0 )
 			{
 				_pep_prob prob = _pep_get_prob_from_ctx( context_ref, symbol );
 				_pep_arith_encode( &ac, prob );
@@ -562,7 +494,7 @@ static inline pep pep_compress( const uint32_t* in_pixels, const uint16_t width,
 			}
 			else
 			{
-				if( PEP_LIKELY( context_sum != 0 ) )
+				if( context_sum != 0 )
 				{
 					_pep_prob prob = _pep_get_prob_from_ctx( context_ref, PEP_FREQ_END );
 					_pep_arith_encode( &ac, prob );
@@ -574,7 +506,7 @@ static inline pep pep_compress( const uint32_t* in_pixels, const uint16_t width,
 				_pep_prob prob = _pep_get_prob_from_ctx( order0, symbol );
 				_pep_arith_encode( &ac, prob );
 
-				if( PEP_UNLIKELY( context_sum == 0 ) )
+				if( context_sum == 0 )
 				{
 					context_ref->freq[ PEP_FREQ_END ] = 1;
 					context_ref->sum = 1;
@@ -591,7 +523,7 @@ static inline pep pep_compress( const uint32_t* in_pixels, const uint16_t width,
 			indices_in_byte = 0;
 		}
 
-		if( PEP_LIKELY( p < p_end ) )
+		if( p < p_end )
 		{
 			++p;
 		}
@@ -631,9 +563,10 @@ static inline uint32_t* pep_decompress( const pep* const in_pep, const pep_forma
 	const uint8_t indices_per_byte = 8 / bits_per_index;
 	const uint8_t index_mask = ( 1 << bits_per_index ) - 1;
 
-	static _pep_context contexts[ PEP_CONTEXTS_MAX + 1 ] = { 0 };
+	static _pep_context contexts[ PEP_CONTEXTS_MAX + 1 ];
+	memset( contexts, 0, sizeof( _pep_context ) * ( PEP_CONTEXTS_MAX + 1 ) );
 
-	_pep_context* restrict order0 = &contexts[ PEP_CONTEXTS_MAX ];
+	_pep_context* order0 = &contexts[ PEP_CONTEXTS_MAX ];
 	for( uint64_t i = 0; i < PEP_FREQ_N; i++ ) order0->freq[ i ] = 1;
 	order0->sum = PEP_FREQ_N;
 
@@ -644,12 +577,7 @@ static inline uint32_t* pep_decompress( const pep* const in_pep, const pep_forma
 	const uint16_t max_symbols = in_pep->max_symbols + 1;
 
 	static uint32_t palette[ 256 ];
-	// Pre-reformat the palette once to the desired output format
-	const uint32_t* restrict src_palette = in_pep->palette;
-	for( uint32_t i = 0; i < in_pep->palette_size; ++i )
-	{
-		palette[ i ] = _pep_reformat( src_palette[ i ], in_pep->format, out_format );
-	}
+	memcpy( palette, in_pep->palette, in_pep->palette_size * sizeof( uint32_t ) );
 	const uint64_t packed_indices_size = area / indices_per_byte;
 
 	if( transparent_first_color != 0 )
@@ -683,7 +611,7 @@ static inline uint32_t* pep_decompress( const pep* const in_pep, const pep_forma
 	_pep_sym_decode decode_result;
 	for( uint64_t b = 0; b < packed_indices_size; b++ )
 	{
-		_pep_context* const restrict context_ref = &contexts[ context_id & PEP_CONTEXTS_MASK ];
+		_pep_context* const context_ref = &contexts[ context_id % PEP_CONTEXTS_MAX ];
 		const uint32_t context_sum = context_ref->sum;
 
 		uint8_t symbol_found = 0;
@@ -730,7 +658,7 @@ static inline uint32_t* pep_decompress( const pep* const in_pep, const pep_forma
 			while( indices_in_byte < indices_per_byte && canvas_pos < area )
 			{
 				const uint8_t palette_idx = ( decode_result.symbol >> ( indices_in_byte * bits_per_index ) ) & index_mask;
-				out_pixels[ canvas_pos ] = palette[ palette_idx ];
+				out_pixels[ canvas_pos ] = _pep_reformat( palette[ palette_idx ], in_pep->format, out_format );
 				++canvas_pos;
 				++indices_in_byte;
 			}
@@ -739,7 +667,7 @@ static inline uint32_t* pep_decompress( const pep* const in_pep, const pep_forma
 		{
 			if( canvas_pos < area )
 			{
-				out_pixels[ canvas_pos ] = palette[ decode_result.symbol ];
+				out_pixels[ canvas_pos ] = _pep_reformat( palette[ decode_result.symbol ], in_pep->format, out_format );
 				++canvas_pos;
 			}
 		}
@@ -842,24 +770,12 @@ static inline uint8_t* pep_serialize( const pep* in_pep, uint32_t* const out_siz
 			break;
 
 		case _pep_8bit:
-			// Optimized palette copy
-			for( uint16_t i = 0; i < palette_count; ++i )
-			{
-				uint32_t c = in_pep->palette[ i ];
-				*bytes_ref++ = (uint8_t)( c & 0xFF );
-				*bytes_ref++ = (uint8_t)( ( c >> 8 ) & 0xFF );
-				*bytes_ref++ = (uint8_t)( ( c >> 16 ) & 0xFF );
-				*bytes_ref++ = (uint8_t)( ( c >> 24 ) & 0xFF );
-			}
+			memcpy( bytes_ref, in_pep->palette, palette_count << 2 );
+			bytes_ref += palette_count << 2;
 			break;
 	}
 	
-	// Optimized final byte copy
-	const uint8_t* restrict src_bytes = in_pep->bytes;
-	for( uint32_t i = 0; i < in_pep->bytes_size; ++i )
-	{
-		bytes_ref[ i ] = src_bytes[ i ];
-	}
+	memcpy( bytes_ref, in_pep->bytes, in_pep->bytes_size );
 	
 	*out_size = bytes_ref - out_bytes + in_pep->bytes_size;
 	return out_bytes;
@@ -901,11 +817,7 @@ static inline pep pep_deserialize( const uint8_t* const in_bytes )
 	
 	out_pep.max_symbols = *bytes_ref++;
 	
-	// Zero-initialize palette efficiently
-	for( uint32_t i = 0; i < 256; ++i )
-	{
-		out_pep.palette[ i ] = 0;
-	}
+	memset( out_pep.palette, 0, sizeof( uint32_t ) * 256 );
 	
 	switch( out_pep.color_bits )
 	{
@@ -949,27 +861,13 @@ static inline pep pep_deserialize( const uint8_t* const in_bytes )
 			break;
 
 		case _pep_8bit:
-			// Optimized palette read
-			for( uint16_t i = 0; i < out_pep.palette_size; ++i )
-			{
-				uint32_t c = (uint32_t)bytes_ref[ 0 ] |
-				           ( (uint32_t)bytes_ref[ 1 ] << 8 ) |
-				           ( (uint32_t)bytes_ref[ 2 ] << 16 ) |
-				           ( (uint32_t)bytes_ref[ 3 ] << 24 );
-				out_pep.palette[ i ] = c;
-				bytes_ref += 4;
-			}
+			memcpy( out_pep.palette, bytes_ref, out_pep.palette_size << 2 );
+			bytes_ref += out_pep.palette_size << 2;
 			break;
 	}
 	
 	out_pep.bytes = ( uint8_t* )PEP_MALLOC( out_pep.bytes_size );
-	// Optimized byte copy
-	uint8_t* restrict dst = out_pep.bytes;
-	const uint8_t* restrict src = bytes_ref;
-	for( uint32_t i = 0; i < out_pep.bytes_size; ++i )
-	{
-		dst[ i ] = src[ i ];
-	}
+	memcpy( out_pep.bytes, bytes_ref, out_pep.bytes_size );
 	
 	return out_pep;
 }
